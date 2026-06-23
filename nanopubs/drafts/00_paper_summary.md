@@ -2,13 +2,13 @@
 
 > This is a working scratchpad for the paper-analysis phase. The output of this file feeds the Quote / AIDA / Claim drafts. It is not itself a nanopub.
 
-**Reference paper:** {{PAPER_TITLE}}
+**Reference paper:** Non-Gaussian modelling and statistical denoising of Planck dust polarisation full-sky maps using scattering transforms
 
-**DOI:** {{PAPER_DOI}}
+**DOI:** 10.1051/0004-6361/202244566
 
 **Authors:** _add._
 
-**Year:** {{PAPER_YEAR}}
+**Year:** 2022
 
 ## Headline claim
 
