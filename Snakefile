@@ -1,9 +1,7 @@
-# Snakefile — orchestrates the replication pipeline end-to-end.
+# Snakefile — orchestrates the bioimaging scattering-transform pipeline.
 #
-# Replace the placeholder rules with your actual replication steps. The
-# canonical pattern is one rule per pipeline stage, and each rule wraps a
-# notebook executed via jupytext (so the notebook stays the source of truth
-# and the Snakefile just sequences them).
+# One rule per pipeline stage; each rule wraps a jupytext notebook (the
+# notebook stays the source of truth, the Snakefile just sequences them).
 #
 # Usage:
 #   snakemake --cores 1                  # run everything
@@ -17,17 +15,16 @@ FIGURES = "figures"
 
 rule all:
     input:
-        # Replace with your actual final artefacts:
         f"{FIGURES}/main_result.png",
-        f"{RESULTS}/summary.csv",
 
 
 # ---------- 01: Data download ----------
-# Every replication MUST be self-contained: data is downloaded by the notebook,
-# never assumed to exist locally. See CLAUDE.md § Self-contained data.
+# Self-contained: the microscopy image is downloaded by the notebook, never
+# assumed to exist locally. See CLAUDE.md § Self-contained data.
 rule data_download:
     output:
-        f"{DATA}/raw/dataset.zip",
+        f"{DATA}/raw/microscopy.png",
+        f"{DATA}/raw/sources.json",
     log:
         f"{RESULTS}/logs/01_data_download.log",
     shell:
@@ -37,19 +34,20 @@ rule data_download:
 # ---------- 02: Data clean ----------
 rule data_clean:
     input:
-        f"{DATA}/raw/dataset.zip",
+        f"{DATA}/raw/microscopy.png",
     output:
-        f"{DATA}/clean/dataset.parquet",
+        f"{DATA}/clean/target.npy",
     shell:
         f"cd {{NOTEBOOKS}} && jupytext --to notebook --execute 02_data_clean.py"
 
 
-# ---------- 03: Analysis ----------
+# ---------- 03: Analysis (scattering synthesis) ----------
 rule analysis:
     input:
-        f"{DATA}/clean/dataset.parquet",
+        f"{DATA}/clean/target.npy",
     output:
-        f"{RESULTS}/summary.csv",
+        f"{DATA}/clean/synthesis.npy",
+        f"{DATA}/clean/synthesis_results.json",
     shell:
         f"cd {{NOTEBOOKS}} && jupytext --to notebook --execute 03_analysis.py"
 
@@ -57,7 +55,7 @@ rule analysis:
 # ---------- 04: Figures ----------
 rule figures:
     input:
-        f"{RESULTS}/summary.csv",
+        f"{DATA}/clean/synthesis.npy",
     output:
         f"{FIGURES}/main_result.png",
     shell:
