@@ -16,37 +16,45 @@
 # %% [markdown]
 # # 04 — Figures
 #
-# This notebook produces the figures used in the Jupyter Book. Each figure is
-# saved to `figures/` as a high-DPI PNG **and** displayed inline (so MyST
-# renders the figure inside the Jupyter Book — see
-# `docs/cicd-conventions.md`).
-#
-# **Inline display rule:** always pair `fig.savefig(...)` with `plt.show()`.
-# Without `plt.show()`, MyST builds an empty cell. Don't use
-# `matplotlib.use('Agg')` — it blocks inline display.
+# The headline result: the input microscopy texture, the random starting noise,
+# and the scattering-transform synthesis that matches the target's multi-scale
+# statistics — a new field of nuclei that was never in the data, generated only
+# from the scattering coefficients.
 
 # %%
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import pandas as pd
+import numpy as np
+
+CLEAN, FIGS = Path("../data/clean"), Path("../figures")
+FIGS.mkdir(parents=True, exist_ok=True)
+plt.style.use("seaborn-v0_8-whitegrid")
+
+target = np.load(CLEAN / "target.npy")
+start = np.load(CLEAN / "start.npy")
+synth = np.load(CLEAN / "synthesis.npy")
+res = json.load(open(CLEAN / "synthesis_results.json"))
 
 # %%
-RESULTS_DIR = Path("../results")
-FIGURES_DIR = Path("../figures")
-FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
-# %% [markdown]
-# ## Main result figure
-
-# %%
-# summary = pd.read_csv(RESULTS_DIR / "summary.csv")
-
-# fig, ax = plt.subplots(figsize=(8, 5))
-# ax.bar(summary["metric"], summary["value"])
-# ax.set_title("Replication headline result")
-# ax.set_ylabel("Value")
-# fig.tight_layout()
-#
-# fig.savefig(FIGURES_DIR / "main_result.png", dpi=150, bbox_inches="tight")
-# plt.show()  # required for MyST inline display
+vmin, vmax = float(target.min()), float(target.max())
+fig, ax = plt.subplots(1, 3, figsize=(11, 4))
+panels = [
+    (target, "Input microscopy texture\n(dividing nuclei)"),
+    (start, "Random start"),
+    (synth, f"Scattering synthesis\n({res['scat_improvement_pct']:.0f}% coefficient match)"),
+]
+for a, (im, title) in zip(ax, panels):
+    a.imshow(im, cmap="gray", vmin=vmin, vmax=vmax)
+    a.set_title(title, fontsize=10)
+    a.set_xticks([])
+    a.set_yticks([])
+fig.suptitle(
+    "Bioimaging scattering-transform texture synthesis "
+    f"(FOSCAT, image_2d, {res['size']}px, {res['nsteps']} steps)",
+    fontsize=11,
+)
+fig.savefig(FIGS / "main_result.png", dpi=150, bbox_inches="tight")
+plt.show()
+print(f"wrote figures/main_result.png — {res['scat_improvement_pct']:.1f}% scattering-coefficient match")

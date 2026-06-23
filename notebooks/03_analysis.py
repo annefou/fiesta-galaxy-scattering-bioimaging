@@ -14,58 +14,107 @@
 # ---
 
 # %% [markdown]
-# # 03 — Analysis
+# # 03 — Analysis: scattering-transform texture synthesis
 #
-# This notebook computes the headline statistic that the replication tests.
-# Write the analysis as a faithful port of the original paper's method, with
-# any deviations flagged explicitly in the markdown.
+# Starting from random noise, we synthesise a new image whose **scattering
+# coefficients** match those of the microscopy target. This is the classic
+# scattering-transform texture synthesis (Bruna & Mallat) — the model captures
+# the non-Gaussian, multi-scale statistics of the texture and regenerates a new
+# realisation with the same statistics.
 #
-# **Verify before drafting nanopubs:** the Replication Study's Methodology
-# field and the Outcome's Evidence field will be drafted *from this code* —
-# don't extrapolate framework or hyperparameters from memory. See
-# `docs/verify-before-drafting.md`.
+# This notebook is the **local / same-algorithm path**. It uses exactly the
+# FOSCAT calls (`foscat.scat_cov` with `use_2D=True` → `foscat.Synthesis`) that
+# the Galaxy **`foscat-synthesis`** tool runs (`domain=image_2d`). On Galaxy the
+# identical computation runs as a workflow on the `target.npy` produced by
+# notebook 02; here it runs in-process so CI and the Jupyter Book build
+# hermetically. The sibling FIESTA repositories apply the *same* tool to a
+# HEALPix cosmological map (synthesis) and to SST fields (gap-filling).
 
 # %%
+import json
+import os
+import time
 from pathlib import Path
 
-import pandas as pd
+import numpy as np
 
-# %%
-CLEAN_DIR = Path("../data/clean")
-RESULTS_DIR = Path("../results")
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "4")
 
-# %% [markdown]
-# ## Load clean data
+CLEAN = Path("../data/clean")
 
-# %%
-# clean = pd.read_parquet(CLEAN_DIR / "dataset.parquet")
+NORIENT, KERNELSZ, SEED = 4, 3, 1234
+NSTEPS = 60 if os.environ.get("CI") else 120
 
 # %% [markdown]
-# ## Method (port of paper §X)
-#
-# Briefly state the method and any deviations from the original paper.
-#
-# - **Same as paper:** ...
-# - **Deviations:** ...
+# ## Load the target and build a random start
 
 # %%
-# Implement the analysis here. Examples:
-# - Statistical model fit (statsmodels, bambi, scikit-learn)
-# - ML training/evaluation (PyTorch, TensorFlow, scikit-learn)
-# - Spatial aggregation + zonal statistics
+target2d = np.load(CLEAN / "target.npy").astype(np.float32)
+target = target2d.reshape(1, *target2d.shape)
+rng = np.random.default_rng(SEED)
+start = (rng.standard_normal(size=target.shape).astype(np.float32)
+         * float(target.std()) + float(target.mean()))
+print(f"target {target.shape}  mean {target.mean():.4f} std {target.std():.4f}")
 
 # %% [markdown]
-# ## Persist results
+# ## FOSCAT scattering operator (2D) — same configuration as the Galaxy tool
 
 # %%
-# Persist a tidy summary that downstream notebooks (and the Outcome
-# nanopub draft) can read. Include numerical headlines + uncertainty.
-#
-# Example:
-# summary = pd.DataFrame({
-#     "metric": ["coefficient", "p_value", "n"],
-#     "value":  [0.4792, 1e-5, 528],
-# })
-# summary.to_csv(RESULTS_DIR / "summary.csv", index=False)
-# print(summary)
+import foscat.scat_cov as sc
+import foscat.Synthesis as synthe
+
+scat = sc.funct(NORIENT=NORIENT, KERNELSZ=KERNELSZ, all_type="float32",
+                silent=True, use_2D=True)
+print("FOSCAT device:", scat.backend.device)
+
+ref, sref = scat.eval(target, calc_var=True)
+
+
+def the_loss(x, scat_operator, args):
+    ref_a, _mask, sref_a = args[0], args[1], args[2]
+    learn = scat_operator.eval(x)
+    diff = (ref_a - learn) / sref_a
+    return scat_operator.reduce_mean(scat_operator.square(diff))
+
+
+loss = synthe.Loss(the_loss, scat, ref, None, sref)
+sy = synthe.Synthesis([loss])
+
+# %% [markdown]
+# ## Run the synthesis
+
+# %%
+print(f"running synthesis: {NSTEPS} L-BFGS steps...")
+t0 = time.time()
+omap = sy.run(scat.backend.bk_cast(start),
+              EVAL_FREQUENCY=max(NSTEPS // 10, 1), NUM_EPOCHS=NSTEPS, do_lbfgs=True)
+omap_np = np.array(omap) if not hasattr(omap, "numpy") else omap.numpy()
+elapsed = time.time() - t0
+np.save(CLEAN / "synthesis.npy", omap_np.reshape(target2d.shape))
+np.save(CLEAN / "start.npy", start.reshape(target2d.shape))
+
+# %% [markdown]
+# ## Validation — how close are the scattering coefficients?
+
+# %%
+ref_s1 = scat.backend.to_numpy(ref.S1)
+out_s1 = scat.backend.to_numpy(scat.eval(omap_np).S1)
+start_s1 = scat.backend.to_numpy(scat.eval(start).S1)
+err_start = float(np.mean((ref_s1 - start_s1) ** 2))
+err_out = float(np.mean((ref_s1 - out_s1) ** 2))
+improvement = (1.0 - err_out / err_start) * 100.0 if err_start > 0 else 0.0
+
+results = {
+    "domain": "image_2d", "size": int(target2d.shape[0]),
+    "norient": NORIENT, "kernelsz": KERNELSZ, "nsteps": NSTEPS,
+    "device": str(scat.backend.device), "elapsed_s": round(elapsed, 2),
+    "scat_err_start": err_start, "scat_err_synth": err_out,
+    "scat_improvement_pct": round(improvement, 2),
+    "target_mean": float(target.mean()), "target_std": float(target.std()),
+    "synth_mean": float(omap_np.mean()), "synth_std": float(omap_np.std()),
+}
+with open(CLEAN / "synthesis_results.json", "w") as f:
+    json.dump(results, f, indent=2)
+print(f"synthesis done in {elapsed:.1f}s | scattering-coefficient error "
+      f"{err_start:.4f} -> {err_out:.4f}  ({improvement:.1f}% closer to the target)")

@@ -30,6 +30,12 @@ nbclient = "*"
 ipykernel = "*"
 # --- pipeline driver ---
 snakemake = "*"
+# --- scattering transform (FOSCAT) + bioimaging I/O ---
+foscat = "2026.4.1.*"      # scattering transform on 2D images / HEALPix (conda-forge)
+pytorch-cpu = "*"          # FOSCAT's torch backend (CPU build for hermetic CI)
+scikit-image = "*"         # microscopy sample image + resize
+pooch = "*"                # scikit-image data registry downloader
+imageio = "*"              # PNG read/write
 # --- replace/extend with the deps your replication needs ---
 # Examples (uncomment as needed):
 # statsmodels = "*"          # GLM/GLMM regression

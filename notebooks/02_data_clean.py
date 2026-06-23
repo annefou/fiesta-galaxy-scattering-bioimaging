@@ -16,53 +16,41 @@
 # %% [markdown]
 # # 02 — Data clean
 #
-# This notebook tidies the raw data from `data/raw/` into an analysis-ready
-# format in `data/clean/`. Document every transformation: filters, renames,
-# joins, deduplications, projections, etc. The cleaned data is what the
-# analysis notebook consumes.
+# Turns the raw microscopy image into the **2D target array** that the
+# scattering-transform synthesis ingests — the exact same `.npy` interface the
+# Galaxy `foscat-synthesis` tool expects (`domain=image_2d`, a single 2D
+# `float32` array).
+#
+# Steps: load the grayscale field of nuclei, resize to a square `SIZE x SIZE`
+# texture (keeping the whole field), and cast to `float32`. We deliberately
+# keep the natural intensity texture (bright nuclei on a dark background) — that
+# is the non-Gaussian structure the scattering transform captures and
+# regenerates.
 
 # %%
+import os
 from pathlib import Path
 
-import pandas as pd
+import imageio.v3 as iio
+import numpy as np
+from skimage import img_as_float, transform
+
+RAW, CLEAN = Path("../data/raw"), Path("../data/clean")
+CLEAN.mkdir(parents=True, exist_ok=True)
+
+# Smaller field in CI keeps the hermetic synthesis fast; full size locally.
+SIZE = 128 if os.environ.get("CI") else 256
 
 # %%
-RAW_DIR = Path("../data/raw")
-CLEAN_DIR = Path("../data/clean")
-CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+img = img_as_float(iio.imread(RAW / "microscopy.png").astype(np.float32))
+if img.ndim == 3:
+    img = img.mean(axis=2)
+target = transform.resize(img, (SIZE, SIZE), anti_aliasing=True).astype(np.float32)
 
-# %% [markdown]
-# ## Load raw data
+np.save(CLEAN / "target.npy", target)
+iio.imwrite(CLEAN / "target_preview.png",
+            (255 * (target - target.min()) / (np.ptp(target) + 1e-9)).astype(np.uint8))
 
-# %%
-# Replace with your actual file(s):
-# raw = pd.read_csv(RAW_DIR / "dataset.csv")
-# Or for NetCDF: ds = xr.open_dataset(RAW_DIR / "dataset.nc")
-raw = None
-
-# %% [markdown]
-# ## Apply cleaning steps
-#
-# Document each step. Common patterns:
-#
-# - Filter by date range, region, or quality flag.
-# - Rename columns to a stable schema.
-# - Coerce dtypes.
-# - Drop or impute missing values, with a recorded count.
-# - Join external lookup tables (e.g. species → genus).
-
-# %%
-# Example skeleton:
-# clean = (
-#     raw
-#     .pipe(lambda df: df[df["year"].between(2000, 2020)])
-#     .rename(columns={"raw_col": "clean_col"})
-#     .dropna(subset=["clean_col"])
-# )
-
-# %% [markdown]
-# ## Persist clean data
-
-# %%
-# Example: clean.to_parquet(CLEAN_DIR / "dataset.parquet")
-# print(f"Wrote {len(clean):,} rows to {CLEAN_DIR / 'dataset.parquet'}")
+print(f"wrote data/clean/target.npy — shape {target.shape}, "
+      f"range [{target.min():.4f}, {target.max():.4f}], "
+      f"mean {target.mean():.4f}, std {target.std():.4f}")
